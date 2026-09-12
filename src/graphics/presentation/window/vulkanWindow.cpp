@@ -381,7 +381,14 @@ static void VulkanFindPhysicalDevice(vk::Instance instance, vk::SurfaceKHR surfa
 			EXIT_NOT_IMPLEMENTED(available_extensions.empty());
 
 			for (const char* ext: device_extensions) {
-				if (!HasExtension(available_extensions, ext)) {
+				// Some drivers (e.g. RADV) expose the fragmentShaderBarycentric feature
+				// through vkGetPhysicalDeviceFeatures2 but do not enumerate the
+				// VK_KHR_fragment_shader_barycentric extension name. The feature is
+				// required above, so treat the extension name as optional in that case;
+				// the feature itself is still enabled via the device creation pNext chain.
+				if (!HasExtension(available_extensions, ext) &&
+				    !(fragment_barycentric.fragmentShaderBarycentric == VK_TRUE &&
+				      std::string_view(ext) == VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME)) {
 					skip_device = true;
 					break;
 				}
@@ -1127,6 +1134,17 @@ void WindowContext::CreateVulkan() {
 		if (HasExtension(available_extensions, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
 			graphic_ctx.memory_budget_ext_enabled = true;
+		}
+		if (!HasExtension(available_extensions, VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME)) {
+			// The extension name is not enumerated by this driver (RADV exposes the
+			// feature instead). The feature is enabled via the device creation pNext
+			// chain, so the name must not be passed to vkCreateDevice.
+			LOGF("VK_KHR_fragment_shader_barycentric is not enumerated; enabling feature via "
+			     "device creation pNext chain\n");
+			device_extensions.erase(
+			    std::remove(device_extensions.begin(), device_extensions.end(),
+			                VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME),
+			    device_extensions.end());
 		}
 		for (const auto* extension: {VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
 		                             VK_EXT_MESH_SHADER_EXTENSION_NAME,
