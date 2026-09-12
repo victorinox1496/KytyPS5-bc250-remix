@@ -2281,6 +2281,8 @@ struct HttpNBEvent {
 	void*    user_arg     = nullptr;
 };
 
+constexpr uint32_t HTTP_EVENT_REQUEST_COMPLETE = 0x1;
+
 LIB_NAME("Http", "Http");
 
 static const char* HttpMethodToString(int method) {
@@ -2625,19 +2627,32 @@ int KYTY_SYSV_ABI HttpWaitRequest(HttpEpollHandle eh, HttpNBEvent* nbev, int max
                                   int timeout) {
 	PRINT_NAME();
 
-	LOGF("\t eh        = 0x%016" PRIx64 "\n"
-	     "\t nbev      = 0x%016" PRIx64 "\n"
-	     "\t maxevents = %d\n"
-	     "\t timeout   = %d\n",
-	     reinterpret_cast<uint64_t>(eh), reinterpret_cast<uint64_t>(nbev), maxevents, timeout);
-
-	EXIT_IF(g_net == nullptr);
-
 	if (eh == nullptr || maxevents < 0 || (maxevents > 0 && nbev == nullptr)) {
 		return HTTP_ERROR_INVALID_VALUE;
 	}
 
-	return 0;
+	EXIT_IF(g_net == nullptr);
+
+	if (maxevents == 0) {
+		return 0;
+	}
+
+	// Networking is not implemented: requests are marked sent with a timeout
+	// result and no response ever arrives. Block for the caller's timeout (so the
+	// guest does not spin), then deliver one epoll event for the associated
+	// request so the caller can observe the failure and continue (UE4 titles that
+	// poll HTTP in a loop otherwise hang on a black screen).
+	if (timeout != 0) {
+		LibKernel::KernelUsleep(static_cast<uint32_t>(
+		    std::clamp<int64_t>(timeout, 1, std::numeric_limits<int32_t>::max())));
+	}
+
+	nbev[0].events       = HTTP_EVENT_REQUEST_COMPLETE;
+	nbev[0].event_detail = 0;
+	nbev[0].id           = eh->request_id.ToInt();
+	nbev[0].user_arg     = eh->user_arg;
+
+	return 1;
 }
 
 int KYTY_SYSV_ABI HttpGetStatusCode(int request_id, int* status_code) {
