@@ -845,6 +845,19 @@ void CommandProcessor::SetPredication(uint32_t condition, uint32_t op, uint32_t 
 				case 0x01: m_predicate_skip = (value == 0); break;
 				default: EXIT("unknown predication condition: 0x%08" PRIx32 "\n", condition);
 			}
+			// UE4 PS5 titles gate their draws behind a GPU-written "ready" flag.
+			// The host never writes those flags, so with wait_op set (the guest
+			// already waited for the previous submission to finish) treat the
+			// predicate as satisfied and run the draws; otherwise every draw is
+			// skipped and the frame presents black.
+			if (condition == 0x01 && value == 0 && wait_op != 0) {
+				m_predicate_skip = false;
+				static std::atomic<uint32_t> force_count {0};
+				if (force_count.fetch_add(1) < 16) {
+					LOGF("predication: forcing draws to run (cond=1 value=0 wait_op=%u) at 0x%016llx\n",
+					     wait_op, static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(address)));
+				}
+			}
 			static std::atomic<uint32_t> log_count {0};
 			if (log_count.fetch_add(1) < 128) {
 				LOGF("\t bool predication: addr=0x%016" PRIx64 ", value=0x%016" PRIx64
