@@ -10,11 +10,15 @@
 #include "graphics/shader/shader.h"
 
 #include <cstddef>
+#include <deque>
 #include <filesystem>
 #include <memory>
 #include <span>
+#include <thread>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace Libs::Graphics {
 
@@ -136,7 +140,10 @@ public:
 	                                const HW::ShaderRegisters&   sh,
 	                                ShaderComputeInputInfo&      input_info);
 
-	Pipeline&
+	// Returns nullptr when the pipeline is not yet compiled and is being built
+	// asynchronously on a worker thread; the caller should skip the draw until the
+	// pipeline lands in the cache.
+	Pipeline*
 	CreateGraphicsPipeline(std::span<const RenderColorInfo> colors, const RenderDepthInfo& depth,
 	                       const ShaderVertexInputInfo& vs_input_info, CommandBuffer& command,
 	                       const ShaderPixelInputInfo* ps_input_info,
@@ -214,6 +221,26 @@ private:
 	                                                        m_graphics_pipelines;
 	std::unordered_map<uint64_t, std::unique_ptr<Pipeline>> m_compute_pipelines;
 	Common::Mutex m_mutex;
+
+	struct GraphicsCompileJob {
+		GraphicsPipelineKey      key;
+		PipelineRenderingState   rendering;
+		ShaderVertexInputInfo    vs_input_info;
+		ShaderPixelInputInfo     ps_input_info;
+		bool                     ps_active       = false;
+		ShaderProgram            vertex_program;
+		ShaderProgram            pixel_program;
+		PipelineStaticParameters static_params;
+	};
+
+	std::unordered_set<GraphicsPipelineKey, GraphicsPipelineKeyHash> m_pending_graphics_pipelines;
+	std::deque<GraphicsCompileJob>                                   m_compile_queue;
+	Common::CondVar                                                  m_compile_cond;
+	bool                                                             m_compile_stop = false;
+	std::vector<std::thread>                                         m_compile_threads;
+
+	void StartCompileThreads();
+	static void CompileThreadMain(PipelineCache* cache);
 
 	void InitializeDriverCache();
 };
