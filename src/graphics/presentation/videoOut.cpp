@@ -208,6 +208,16 @@ public:
 	void GetFlipStatus(VideoOutConfig& cfg, VideoOutFlipStatus& out);
 	void Wait(VideoOutConfig& cfg, int index);
 
+	uint32_t DebugGetPendingCount() {
+		Common::LockGuard lock(m_mutex);
+		return static_cast<uint32_t>(m_requests.size() + m_cpu_requests.size());
+	}
+
+	bool DebugIsProcessing() {
+		Common::LockGuard lock(m_mutex);
+		return m_processing;
+	}
+
 private:
 	enum class RequestState { Reserved, Recording, Ready, Presenting };
 
@@ -276,6 +286,22 @@ static std::unique_ptr<VideoOutDriver> g_video_out_driver;
 static VideoOutDriver::Impl& DriverState() {
 	EXIT_IF(g_video_out_driver == nullptr);
 	return g_video_out_driver->State();
+}
+
+static bool VideoOutDebugEnabled() {
+	return Config::VideoOutDebugEnabled() &&
+	       Config::GetPrintfDirection() != Config::OutputDirection::Silent;
+}
+
+static bool VideoOutDebugLogRateLimit() {
+	static uint64_t last = 0;
+	const auto      freq = Common::Timer::QueryPerformanceFrequency();
+	const auto      now  = Common::Timer::QueryPerformanceCounter();
+	if (last == 0 || (now - last) >= freq / 4) {
+		last = now;
+		return true;
+	}
+	return false;
 }
 
 static uintptr_t VideoOutEventId(VideoOutEventKind kind) {
@@ -358,6 +384,9 @@ static void TriggerVideoOutEvents(VideoOutConfig& video_out, VideoOutEventKind k
 	{
 		Common::LockGuard lock(video_out.events->mutex);
 		queues = VideoOutEventQueuesFor(*video_out.events, kind);
+	}
+	if (kind == VideoOutEventKind::Flip && VideoOutDebugEnabled()) {
+		LOGF("VoTrigger: Flip fired, queues=%zu data=%p\n", queues.size(), trigger_data);
 	}
 	for (const auto& registration: queues) {
 		if (!registration || registration->generation != video_out.generation) {
@@ -516,6 +545,11 @@ static int ReserveFlipRequest(VideoOutDriver::Impl& driver, int handle, int inde
 	}
 	if (!driver.GetFlipQueue().Reserve(*video_out, index, flip_arg, source, request_id)) {
 		return VIDEO_OUT_ERROR_FLIP_QUEUE_FULL;
+	}
+	if (VideoOutDebugEnabled() && VideoOutDebugLogRateLimit()) {
+		LOGF("VoReserve: handle=%d index=%d flip_mode=%d flip_arg=%lld source=%d gen=%llu\n", handle,
+		     index, flip_mode, flip_arg, static_cast<int>(source),
+		     static_cast<unsigned long long>(video_out->generation));
 	}
 	return OK;
 }
@@ -809,6 +843,11 @@ void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
 
 		VblankBegin();
 		bool presented = m_flip_queue.Flip(0);
+		if (VideoOutDebugEnabled() && VideoOutDebugLogRateLimit()) {
+			LOGF("PT: vblank%d queue=%u cpu=%u proc=%d\n", presented ? 1 : 0,
+			     m_flip_queue.DebugGetPendingCount(),
+			     static_cast<uint32_t>(m_video_out_ctx[0].vblank_status.count), m_flip_queue.DebugIsProcessing());
+		}
 		if (!presented && m_presenter.NeedsSystemOverlayRefresh()) {
 			if (auto* frame = m_presenter.PrepareLastFrame(); frame != nullptr) {
 				m_presenter.Present(*frame, true);
@@ -1090,6 +1129,10 @@ bool FlipQueue::Flip(uint32_t micros) {
 		m_submit_cond_var.WaitFor(&m_mutex, micros);
 
 		if (m_requests.empty()) {
+			if (VideoOutDebugEnabled() && VideoOutDebugLogRateLimit()) {
+				LOGF("VoFlipFalse: empty (state=idle), pending=%zu cpu=%zu\n", m_requests.size(),
+				     m_cpu_requests.size());
+			}
 			m_mutex.Unlock();
 			return false;
 		}
@@ -1098,6 +1141,11 @@ bool FlipQueue::Flip(uint32_t micros) {
 		EXIT("video-out flip queue processing is already active\n");
 	}
 	if (m_requests.front().state != RequestState::Ready) {
+		if (VideoOutDebugEnabled() && VideoOutDebugLogRateLimit()) {
+			LOGF("VoFlipFalse: front not ready, state=%d pending=%zu cpu=%zu\n",
+			     static_cast<int>(m_requests.front().state), m_requests.size(),
+			     m_cpu_requests.size());
+		}
 		m_mutex.Unlock();
 		return false;
 	}
@@ -1107,6 +1155,12 @@ bool FlipQueue::Flip(uint32_t micros) {
 
 	r.cfg->mutex.Lock();
 	if (!IsFlipDueLocked(*r.cfg, r.generation)) {
+		if (VideoOutDebugEnabled() && VideoOutDebugLogRateLimit()) {
+			LOGF("VoFlipFalse: not flip due (rate=%d vc=%llu gen_cur=%llu gen_req=%llu)\n",
+			     r.cfg->flip_rate, static_cast<unsigned long long>(r.cfg->vblank_status.count),
+			     static_cast<unsigned long long>(r.cfg->generation),
+			     static_cast<unsigned long long>(r.generation));
+		}
 		r.cfg->mutex.Unlock();
 		Common::LockGuard queue_lock(m_mutex);
 		m_processing = false;

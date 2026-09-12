@@ -95,6 +95,10 @@ bool GraphicsDebugDumpEnabled() {
 	return g_config->graphics_debug_dump_enabled;
 }
 
+bool VideoOutDebugEnabled() {
+	return g_config->videoout_debug_enabled;
+}
+
 OutputDirection GetPrintfDirection() {
 	return g_config->printf_direction;
 }
