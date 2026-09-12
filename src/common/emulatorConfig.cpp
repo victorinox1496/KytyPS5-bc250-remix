@@ -99,6 +99,10 @@ bool VideoOutDebugEnabled() {
 	return g_config->videoout_debug_enabled;
 }
 
+bool FlipIdleRescueEnabled() {
+	return g_config->flip_idle_rescue_enabled;
+}
+
 OutputDirection GetPrintfDirection() {
 	return g_config->printf_direction;
 }

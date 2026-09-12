@@ -68,6 +68,7 @@ static void PrintUsage() {
 	::printf("  --command-buffer-dump-folder <path>  Command buffer dump folder.\n");
 	::printf("  --graphics-debug-dump <true|false>   Enable graphics debug dumps.\n");
 	::printf("  --videoout-debug <true|false>       Enable video-out flip diagnostics.\n");
+	::printf("  --flip-idle-rescue <true|false>     Re-present last frame after idle stall.\n");
 	::printf("  --printf-direction <value>           Silent, Console, or File.\n");
 	::printf("  --printf-output-file <path>          Guest printf output file.\n");
 	::printf("  --profiler-direction <value>         None or Network.\n");
@@ -289,6 +290,11 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 			}
 		} else if (arg == "--videoout-debug") {
 			if (!ParseBool(value, options.config.videoout_debug_enabled)) {
+				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
+				return false;
+			}
+		} else if (arg == "--flip-idle-rescue") {
+			if (!ParseBool(value, options.config.flip_idle_rescue_enabled)) {
 				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
 				return false;
 			}

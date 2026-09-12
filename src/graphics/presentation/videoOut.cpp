@@ -52,6 +52,7 @@ constexpr int      VIDEO_OUT_BUFFER_INDEX_BLACK                         = -2;
 constexpr int      VIDEO_OUT_BUFFER_INDEX_BLANK                         = -1;
 constexpr int      VIDEO_OUT_BUFFER_NUM_MAX                             = 16;
 constexpr size_t   VIDEO_OUT_FLIP_QUEUE_CAPACITY                        = 16;
+constexpr int      IDLE_RESCUE_VBLANKS                                  = 8;
 constexpr int      VIDEO_OUT_BUFFER_ATTRIBUTE_NUM_MAX                   = 4;
 constexpr uint64_t VIDEO_OUT_OUTPUT_MODE_DEFAULT                        = 0x0000000000000001ULL;
 constexpr uint64_t VIDEO_OUT_OUTPUT_MODE_119_88HZ                       = 0x000000000000000FULL;
@@ -279,6 +280,7 @@ private:
 	Graphics::Presenter&     m_presenter;
 	FlipQueue                m_flip_queue;
 	std::jthread             m_present_thread;
+	int                      m_idle_vblanks = 0;
 };
 
 static std::unique_ptr<VideoOutDriver> g_video_out_driver;
@@ -841,12 +843,44 @@ void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
 			continue;
 		}
 
-		VblankBegin();
+VblankBegin();
 		bool presented = m_flip_queue.Flip(0);
 		if (VideoOutDebugEnabled() && VideoOutDebugLogRateLimit()) {
 			LOGF("PT: vblank%d queue=%u cpu=%u proc=%d\n", presented ? 1 : 0,
 			     m_flip_queue.DebugGetPendingCount(),
-			     static_cast<uint32_t>(m_video_out_ctx[0].vblank_status.count), m_flip_queue.DebugIsProcessing());
+			     static_cast<uint32_t>(m_video_out_ctx[0].vblank_status.count),
+			     m_flip_queue.DebugIsProcessing());
+		}
+		if (presented) {
+			m_idle_vblanks = 0;
+		} else if (Config::FlipIdleRescueEnabled() &&
+		           m_flip_queue.DebugGetPendingCount() == 0) {
+			m_idle_vblanks++;
+			if (m_idle_vblanks >= IDLE_RESCUE_VBLANKS) {
+				m_idle_vblanks = 0;
+				Graphics::Presenter::Frame* frame = m_presenter.PrepareLastFrame();
+				if (frame != nullptr) {
+					m_presenter.Present(*frame, true);
+				}
+				for (int handle = 0; handle < VIDEO_OUT_NUM_MAX; handle++) {
+					Common::LockGuard lock(m_mutex);
+					auto&             candidate = m_video_out_ctx[handle];
+					if (!candidate.opened || candidate.closing || candidate.flip_status.count == 0) {
+						continue;
+					}
+					Common::LockGuard cfg_lock(candidate.mutex);
+					candidate.flip_status.count++;
+					candidate.flip_status.processTime = LibKernel::KernelGetProcessTime();
+					candidate.flip_status.processTimeCounter =
+					    LibKernel::KernelGetProcessTimeCounter();
+					LOGF("[VideoOut] IdleRescue: republished last frame on handle %d "
+					     "(count=%llu arg=0x%016" PRIx64 ")\n",
+					     handle, static_cast<unsigned long long>(candidate.flip_status.count),
+					     static_cast<uint64_t>(candidate.flip_status.flipArg));
+					TriggerVideoOutEvents(candidate, VideoOutEventKind::Flip,
+					                      reinterpret_cast<void*>(candidate.flip_status.flipArg));
+				}
+			}
 		}
 		if (!presented && m_presenter.NeedsSystemOverlayRefresh()) {
 			if (auto* frame = m_presenter.PrepareLastFrame(); frame != nullptr) {

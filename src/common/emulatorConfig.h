@@ -61,6 +61,7 @@ struct ConfigOptions {
 	std::filesystem::path  command_buffer_dump_folder  = "_Buffers";
 	bool                   graphics_debug_dump_enabled = false;
 	bool                   videoout_debug_enabled      = false;
+	bool                   flip_idle_rescue_enabled     = false;
 	OutputDirection        printf_direction            = OutputDirection::Silent;
 	std::filesystem::path  printf_output_file          = "_kyty.txt";
 	ProfilerDirection      profiler_direction          = ProfilerDirection::None;
@@ -99,6 +100,8 @@ std::filesystem::path GetCommandBufferDumpFolder();
 bool GraphicsDebugDumpEnabled();
 
 bool VideoOutDebugEnabled();
+
+bool FlipIdleRescueEnabled();
 
 OutputDirection       GetPrintfDirection();
 std::filesystem::path GetPrintfOutputFile();
