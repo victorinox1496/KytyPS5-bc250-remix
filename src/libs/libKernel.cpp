@@ -2112,6 +2112,39 @@ int KYTY_SYSV_ABI KernelSyncOnAddressWake(volatile void* address, int32_t count)
 	return LibKernel::SyncOnAddress::Wake(address, count);
 }
 
+int KYTY_SYSV_ABI UmtxOp(volatile void* address, int operation, uint64_t value, void* uaddr,
+                         const void* timeout) {
+	// FreeBSD _umtx_op(). Unity PS5 runtimes build their lightweight thread
+	// synchronization on UMTX_OP_WAIT / UMTX_OP_WAKE rather than on the
+	// pthread wrappers. WAIT blocks until *address != value; WAKE releases up
+	// to `value` waiters sleeping on *address.
+	constexpr int UMTX_OP_WAIT = 2;
+	constexpr int UMTX_OP_WAKE = 3;
+
+	EXIT_NOT_IMPLEMENTED(uaddr != nullptr);
+
+	switch (operation) {
+		case UMTX_OP_WAIT: {
+			// One-shot wait. A non-null timeout points at a guest struct timespec.
+			const uint32_t* timeout_micros = nullptr;
+			uint32_t        micros         = 0;
+			if (timeout != nullptr) {
+				auto timespec = *static_cast<const LibKernel::KernelTimespec*>(timeout);
+				EXIT_IF(timespec.tv_sec < 0 || timespec.tv_nsec < 0 || timespec.tv_nsec >= 1000000000);
+				const int64_t us = timespec.tv_sec * 1000000 + timespec.tv_nsec / 1000;
+				micros           = us > static_cast<int64_t>(UINT32_MAX) ? UINT32_MAX : static_cast<uint32_t>(us);
+				timeout_micros   = &micros;
+			}
+			return POSIX_CALL(LibKernel::SyncOnAddress::Wait64(
+			    static_cast<volatile uint64_t*>(address), value, timeout_micros,
+			    LibKernel::KernelDispatchPendingSignalForCurrentThread));
+		}
+		case UMTX_OP_WAKE:
+			return POSIX_CALL(LibKernel::SyncOnAddress::Wake(address, static_cast<int32_t>(value)));
+		default: EXIT("Unsupported _umtx_op operation: %d\n", operation);
+	}
+}
+
 LIB_DEFINE(InitLibKernel_1_Posix) {
 	LIB_FUNC("k+AXqu2-eBc", getpagesize);
 	LIB_FUNC("lLMT9vJAck0", clock_gettime);
@@ -3319,6 +3352,8 @@ LIB_DEFINE(InitLibKernel_1) {
 	LibKernelApr::InitLibKernel_1_Apr(s);
 	Posix::InitLibKernel_1_Posix(s);
 	LibKernelWriteThrottling::InitLibKernelWriteThrottling(s);
+
+	LIB_FUNC("04AjkP0jO9U", Posix::UmtxOp);
 
 	LIB_OBJECT("f7uOxY9mM1U", &LibKernel::g_stack_chk_guard);
 	LIB_OBJECT("djxxOmW6-aw", &LibKernel::g_progname);
