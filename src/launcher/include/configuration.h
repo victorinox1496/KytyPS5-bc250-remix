@@ -95,6 +95,7 @@ public:
 	int                    user_id                     = Config::DEFAULT_USER_ID;
 	PresentMode            present_mode                = PresentMode::Fifo;
 	bool                   fullscreen_enabled          = false;
+	bool                   flip_idle_rescue_enabled    = true;
 	bool                   readback_linear_images      = false;
 	int                    vblank_frequency            = 60;
 	int                    console_language            = DEFAULT_CONSOLE_LANGUAGE;
@@ -122,6 +123,7 @@ public:
 		user_id                     = other.user_id;
 		present_mode                = other.present_mode;
 		fullscreen_enabled          = other.fullscreen_enabled;
+		flip_idle_rescue_enabled    = other.flip_idle_rescue_enabled;
 		readback_linear_images      = other.readback_linear_images;
 		vblank_frequency            = other.vblank_frequency;
 		console_language            = other.console_language;
@@ -166,6 +168,7 @@ public:
 		KYTY_CFG_SET(user_id);
 		KYTY_CFG_SET(present_mode);
 		KYTY_CFG_SET(fullscreen_enabled);
+		KYTY_CFG_SET(flip_idle_rescue_enabled);
 		KYTY_CFG_SET(readback_linear_images);
 		KYTY_CFG_SET(vblank_frequency);
 		KYTY_CFG_SET(console_language);
@@ -204,6 +207,7 @@ public:
 			present_mode = PresentMode::Fifo;
 		}
 		KYTY_CFG_GET(fullscreen_enabled);
+		KYTY_CFG_GET(flip_idle_rescue_enabled);
 		KYTY_CFG_GET(readback_linear_images);
 		vblank_frequency = s->value("vblank_frequency", vblank_frequency).toInt();
 		console_language = s->value("console_language", console_language).toInt();

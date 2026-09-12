@@ -229,6 +229,7 @@ static QStringList CreateEmulatorArgs(const Configuration& info) {
 	args << "--user-name" << info.user_name;
 	args << "--user-id" << QString::number(info.user_id);
 	args << "--present-mode" << EnumToText(info.present_mode);
+	args << "--flip-idle-rescue" << BoolArg(info.flip_idle_rescue_enabled);
 	if (info.fullscreen_enabled) {
 		args << "--fullscreen";
 	}
