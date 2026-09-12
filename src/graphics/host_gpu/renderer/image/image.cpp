@@ -666,6 +666,21 @@ Image::Image(GraphicContext& graphics, CommandScheduler& scheduler, const ImageI
 	backing.flags       = ImageCreateFlags(info);
 	backing.usage       = ImageUsageFlags(graphics, info);
 
+	// Some hosts (e.g. RADV on gfx10) do not support depth formats with 1D/3D
+	// image types, even though the console driver does. Mirror the console: a
+	// depth surface is always stored as a 2D surface (1D becomes height=1, 3D
+	// becomes a 2D array of depth slices), so degrade the host image to 2D.
+	const bool depth_degrade =
+	    info.IsDepth() && backing.image_type != vk::ImageType::e2D;
+	if (depth_degrade) {
+		backing.image_type = vk::ImageType::e2D;
+		if (info.IsVolume()) {
+			backing.layers  = std::max(info.extent.depth, 1u);
+			backing.extent.depth = 1;
+		}
+		m_depth_degraded = true;
+	}
+
 	vk::ImageCreateInfo create {};
 	create.flags         = backing.flags;
 	create.imageType     = backing.image_type;

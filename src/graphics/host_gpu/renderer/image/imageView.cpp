@@ -311,6 +311,16 @@ vk::ImageView Image::FindView(const ImageViewInfo& view_info) {
 	auto        normalized = view_info;
 	const bool  is_storage = static_cast<bool>(normalized.usage & vk::ImageUsageFlagBits::eStorage);
 	const auto  image_aspect = FullAspectMask(image.format);
+	// A depth surface that was degraded to 2D (depth 1D/3D not supported by the
+	// host) can only be viewed as a 2D / 2D array image.
+	if (m_depth_degraded && image.image_type == vk::ImageType::e2D) {
+		if (normalized.type == vk::ImageViewType::e1D ||
+		    normalized.type == vk::ImageViewType::e1DArray) {
+			normalized.type = vk::ImageViewType::e2D;
+		} else if (normalized.type == vk::ImageViewType::e3D) {
+			normalized.type = vk::ImageViewType::e2DArray;
+		}
+	}
 	if (image_aspect & vk::ImageAspectFlagBits::eDepth &&
 	    ImageViewOps::IsFormatDepthCompatible(normalized.format)) {
 		normalized.format = image.format;
